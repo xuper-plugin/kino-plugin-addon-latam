@@ -11,7 +11,10 @@
 const HOST = "addonlatam.duckdns.org";
 // Kino keeps at most 60 items in a row; a browse page (the addon pages 60 movies or 80 series) up to 100.
 const ROW_MAX = 60;
-const MAX_SKIP = 600;
+const MAX_SKIP = 3000;
+// TMDB pages 20 titles at a time; a shelf is read this deep at most.
+const MAX_TMDB_PAGE = 25;
+const IMG = "https://image.tmdb.org/t/p/w342";
 // A list that answers slower than this is left out, never holding the others back.
 const LIST_TIMEOUT_MS = 8000;
 const RESOLVE_TIMEOUT_MS = 9000;
@@ -21,6 +24,25 @@ const TYPES = [
   { type: "movie", label: "Películas", labelEn: "Movies", genre: "peliculas" },
   { type: "series", label: "Series", labelEn: "Series", genre: "series" },
 ];
+
+// What TMDB's discover can list for each kind. `id` is TMDB's genre id; `vocab` is Kino's closed genre vocabulary for the row.
+// The addon itself only lists new releases and a search (no genres), so these shelves come from TMDB; a title is mapped to
+// the addon's IMDb id only when the person plays it.
+const GENRES = {
+  movie: [
+    { id: 28, es: "Acción", en: "Action" }, { id: 35, es: "Comedia", en: "Comedy" }, { id: 18, es: "Drama", en: "Drama" },
+    { id: 27, es: "Terror", en: "Horror" }, { id: 878, es: "Ciencia ficción", en: "Sci-Fi" },
+    { id: 16, es: "Animación", en: "Animation" }, { id: 53, es: "Suspenso", en: "Thriller" },
+    { id: 10749, es: "Romance", en: "Romance" }, { id: 10751, es: "Familia", en: "Family", vocab: "infantil" },
+    { id: 12, es: "Aventura", en: "Adventure" }, { id: 99, es: "Documental", en: "Documentary", vocab: "documentales" },
+  ],
+  series: [
+    { id: 10759, es: "Acción y aventura", en: "Action & Adventure" }, { id: 35, es: "Comedia", en: "Comedy" },
+    { id: 18, es: "Drama", en: "Drama" }, { id: 9648, es: "Misterio", en: "Mystery" }, { id: 80, es: "Crimen", en: "Crime" },
+    { id: 16, es: "Animación", en: "Animation" }, { id: 10765, es: "Ciencia ficción y fantasía", en: "Sci-Fi & Fantasy" },
+    { id: 99, es: "Documental", en: "Documentary", vocab: "documentales" },
+  ],
+};
 
 // ---- 1. texts -------------------------------------------------------------------------------------------------
 
@@ -39,6 +61,7 @@ const TEXTS = {
     healthOk: "responde", healthFail: "falla", healthNone: "sin datos",
     probeOk: "Listo: el servicio responde", probeFail: "El servicio no responde ahora",
     tileMovies: "Estrenos de cine", tileSeries: "Estrenos de series",
+    shelfPop: "Populares", shelfTop: "Mejor valoradas", tabNew: "Estrenos", noTmdb: "Este título no se pudo identificar. Prueba otro.",
     langLatino: "Latino", langCastellano: "Castellano", langSub: "Subtitulado", langEn: "Inglés",
   },
   en: {
@@ -53,6 +76,7 @@ const TEXTS = {
     healthOk: "responding", healthFail: "failing", healthNone: "no data",
     probeOk: "Done: the service responds", probeFail: "The service is not responding right now",
     tileMovies: "New in cinemas", tileSeries: "New series",
+    shelfPop: "Popular", shelfTop: "Top rated", tabNew: "New", noTmdb: "This title could not be identified. Try another.",
     langLatino: "Latin Spanish", langCastellano: "Castilian", langSub: "Subtitled", langEn: "English",
   },
 };
@@ -304,7 +328,75 @@ export async function search(query) {
   return kino.rank.sortBySimilarity(found, titles);
 }
 
-// ---- 6. home, browse, section and categories ------------------------------------------------------------------
+// ---- 6. TMDB shelves ------------------------------------------------------------------------------------------
+
+const FRESH_SHELF_MS = 6 * 60 * 60 * 1000;
+const FRESH_IMDB_MS = 7 * 24 * 60 * 60 * 1000;
+
+function hasTmdb() {
+  return typeof kino.tmdb === "function";
+}
+
+function tmdbLang() {
+  return isSpanish() ? "es-MX" : "en-US";
+}
+
+function typeOf(type) {
+  return TYPES.find((x) => x.type === type);
+}
+
+// A shelf is "pop" (popular), "top" (best rated) or "g<TMDB genre id>".
+function shelfInfo(type, shelf) {
+  if (shelf === "pop") return { title: t("shelfPop"), genre: typeOf(type).genre, params: { sort_by: "popularity.desc", "vote_count.gte": 50 } };
+  if (shelf === "top") return { title: t("shelfTop"), genre: typeOf(type).genre, params: { sort_by: "vote_average.desc", "vote_count.gte": 1500 } };
+  const m = /^g(\d{1,6})$/.exec(String(shelf));
+  const g = m && GENRES[type] && GENRES[type].find((x) => x.id === parseInt(m[1], 10));
+  if (!g) return null;
+  return { title: isSpanish() ? g.es : g.en, genre: g.vocab || typeOf(type).genre, params: { sort_by: "popularity.desc", "vote_count.gte": 100, with_genres: g.id } };
+}
+
+// TMDB's own ids: the addon only knows IMDb ids, so the item carries "tmdb:<n>" until it is played.
+function tmdbItem(m, type) {
+  const poster = m.poster_path ? IMG + m.poster_path : "";
+  const title = String(m.title || m.name || "").trim();
+  if (!poster || !title || !Number.isInteger(m.id)) return null;
+  const movie = type === "movie";
+  const item = { id: "tmdb-" + m.id, ref: (movie ? "m:" : "i:") + "tmdb:" + m.id, title: title.slice(0, 200), kind: movie ? "movie" : "series", poster, ids: { tmdb: m.id } };
+  const year = /^(\d{4})/.exec(String(m.release_date || m.first_air_date || ""));
+  if (year) item.year = year[1];
+  if (m.overview) item.overview = String(m.overview).slice(0, 300);
+  if (typeof m.vote_average === "number" && m.vote_average > 0) item.rating = Math.round(m.vote_average * 10) / 10;
+  return item;
+}
+
+async function shelfPage(type, shelf, page) {
+  const info = shelfInfo(type, shelf);
+  if (!info || !hasTmdb()) throw kino.error("not_found", "unknown shelf " + type + ":" + String(shelf).slice(0, 20));
+  const body = await kino.tmdb("/discover/" + (type === "movie" ? "movie" : "tv"), { ...info.params, language: tmdbLang(), page, include_adult: false });
+  const results = body && Array.isArray(body.results) ? body.results : [];
+  return {
+    items: results.map((m) => tmdbItem(m, type)).filter(Boolean),
+    more: Number(body && body.total_pages) > page && page < MAX_TMDB_PAGE,
+  };
+}
+
+// A shelf's first page, cached; a shelf nobody could read is null and never takes the other rows with it.
+async function shelfRow(type, shelf, prefixed) {
+  const info = shelfInfo(type, shelf);
+  if (!info || !hasTmdb()) return null;
+  try {
+    const lang = isSpanish() ? "es" : "en";
+    const first = await cached(`shelf:${type}:${shelf}:${lang}`, FRESH_SHELF_MS, async () => (await shelfPage(type, shelf, 1)).items);
+    if (!first.length) return null;
+    const name = typeLabel(typeOf(type));
+    return { id: `d-${type}-${shelf}`, title: prefixed ? `${info.title} — ${name}` : info.title, ref: `d:${type}:${shelf}`, items: first.slice(0, ROW_MAX), genre: info.genre };
+  } catch (e) {
+    kino.log(`shelf ${type}:${shelf} failed: ` + (e && e.message));
+    return null;
+  }
+}
+
+// ---- 7. home, browse, section and categories ------------------------------------------------------------------
 
 async function newItems(x) {
   return cached("new:" + x.type, FRESH_NEW_MS, async () => itemsOf(await getJson(newUrl(x.type, 0), LIST_TIMEOUT_MS), x.type));
@@ -320,70 +412,122 @@ async function newRow(x) {
   }
 }
 
+// Home: the new releases of both kinds, then what is popular.
 export async function home() {
   if (kino.config.get("homeRows") === false) return [];
-  return (await mapLimit(TYPES, 2, newRow)).filter(Boolean);
+  const jobs = [
+    () => newRow(TYPES[0]), () => newRow(TYPES[1]),
+    () => shelfRow("movie", "pop", true), () => shelfRow("series", "pop", true),
+  ];
+  return (await mapLimit(jobs, 4, (job) => job())).filter(Boolean);
 }
 
-// A kind's new releases, paged by the addon's `skip`. The first page is cached; later ones are asked for as the person scrolls.
+// A kind's new releases (the addon pages them by `skip`, 1800 movies and 2400 series deep) or a TMDB shelf (page number).
 export async function browse(ref, cursor) {
-  const m = /^n:(movie|series)$/.exec(String(ref || ""));
-  if (!m) throw kino.error("not_found", "unknown browse ref: " + String(ref).slice(0, 60));
-  const type = m[1];
-  const skip = Math.max(0, parseInt(cursor || "0", 10) || 0);
-  const items = skip === 0 ? await newItems({ type }) : itemsOf(await getJson(newUrl(type, skip), 15000), type);
-  // `skip` counts the items already read, whatever size the addon's pages have.
-  return items.length && skip + items.length < MAX_SKIP ? { items: items.slice(0, 100), next: String(skip + items.length) } : { items: items.slice(0, 100) };
+  const n = /^n:(movie|series)$/.exec(String(ref || ""));
+  if (n) {
+    const type = n[1];
+    const skip = Math.max(0, parseInt(cursor || "0", 10) || 0);
+    const items = skip === 0 ? await newItems({ type }) : itemsOf(await getJson(newUrl(type, skip), 15000), type);
+    // `skip` counts the items already read, whatever size the addon's pages have.
+    const page = items.slice(0, 100);
+    return items.length && skip + items.length < MAX_SKIP ? { items: page, next: String(skip + items.length) } : { items: page };
+  }
+  const d = /^d:(movie|series):([a-z0-9]+)$/.exec(String(ref || ""));
+  if (d) {
+    const page = Math.min(MAX_TMDB_PAGE, Math.max(1, parseInt(cursor || "1", 10) || 1));
+    const r = await shelfPage(d[1], d[2], page);
+    return r.more ? { items: r.items, next: String(page + 1) } : { items: r.items };
+  }
+  throw kino.error("not_found", "unknown browse ref: " + String(ref).slice(0, 60));
 }
 
-// The plugin's own section (a chip on the phone's Inicio, an entry in the TV's sidebar): one tab per kind.
+// Shelves of a kind's tab, in the order the person sees them.
+function shelvesOf(type) {
+  return ["pop", "top"].concat((GENRES[type] || []).map((g) => "g" + g.id));
+}
+
+// The plugin's own section (a chip on the phone's Inicio, an entry in the TV's sidebar): New, Movies and Series.
 export async function section({ tab }) {
-  const tabs = TYPES.map((x) => ({ id: x.type, label: typeLabel(x) }));
+  const tabs = [{ id: "new", label: t("tabNew") }, ...TYPES.map((x) => ({ id: x.type, label: typeLabel(x) }))];
   const chosen = tabs.some((x) => x.id === tab) ? tab : tabs[0].id;
-  const row = await newRow(TYPES.find((x) => x.type === chosen));
-  const answer = { tabs, tab: chosen, rows: row ? [row] : [] };
-  if (row) {
+  const jobs = chosen === "new"
+    ? TYPES.map((x) => () => newRow(x))
+    : shelvesOf(chosen).map((shelf) => () => shelfRow(chosen, shelf, false));
+  const rows = (await mapLimit(jobs, 4, (job) => job())).filter(Boolean);
+  const answer = { tabs, tab: chosen, rows };
+  if (rows.length) {
     // Today's pick: the same all day, a different one tomorrow.
-    const pick = row.items[Math.floor(Date.now() / 86400000) % row.items.length];
+    const items = rows[0].items;
+    const pick = items[Math.floor(Date.now() / 86400000) % items.length];
     answer.hero = { title: pick.title, text: t("sectionHero") };
     if (pick.poster) answer.hero.image = pick.poster;
   }
   return answer;
 }
 
-// Two tiles, one per kind. The art of each is its first title's poster, cached 12 h.
+// Categorías: both kinds' new releases, then one tile per genre of each kind (at most 24 tiles). The art of each is its
+// first title's poster, cached 12 h per tile.
 export async function categories() {
-  return mapLimit(TYPES, 2, async (x) => {
+  const tiles = [
+    { id: "movie", title: t("tileMovies"), ref: "n:movie", art: () => newItems(TYPES[0]) },
+    { id: "series", title: t("tileSeries"), ref: "n:series", art: () => newItems(TYPES[1]) },
+  ];
+  if (hasTmdb()) {
+    for (const x of TYPES) {
+      const name = typeLabel(x);
+      for (const shelf of ["pop"].concat((GENRES[x.type] || []).map((g) => "g" + g.id))) {
+        const info = shelfInfo(x.type, shelf);
+        tiles.push({ id: `${x.type}-${shelf}`, title: `${name}: ${info.title}`.slice(0, 40), ref: `d:${x.type}:${shelf}`, art: async () => (await shelfPage(x.type, shelf, 1)).items });
+      }
+    }
+  }
+  const lang = isSpanish() ? "es" : "en";
+  return (await mapLimit(tiles.slice(0, 24), 4, async (tile) => {
     let art = "";
     try {
-      art = await cached("art:" + x.type, FRESH_ART_MS, async () => {
-        const first = (await newItems(x))[0];
+      art = await cached(`art:${tile.id}:${lang}`, FRESH_ART_MS, async () => {
+        const first = (await tile.art())[0];
         return first && first.poster ? first.poster : "";
       });
     } catch (e) {
-      kino.log("art " + x.type + " failed: " + (e && e.message));
+      kino.log("art " + tile.id + " failed: " + (e && e.message));
     }
-    const tile = { id: x.type, title: t(x.type === "movie" ? "tileMovies" : "tileSeries"), ref: "n:" + x.type };
-    if (art) tile.art = art;
-    return tile;
-  });
+    const out = { id: tile.id, title: tile.title, ref: tile.ref };
+    if (art) out.art = art;
+    return out;
+  }));
 }
 
-// ---- 7. episodes and details ----------------------------------------------------------------------------------
+// ---- 7b. episodes and details ---------------------------------------------------------------------------------
 
 function idOf(ref, prefix) {
   const s = String(ref || "");
   return s.startsWith(prefix) && s.length > prefix.length ? s.slice(prefix.length) : null;
 }
 
+// The addon knows IMDb ids only. A shelf title carries "tmdb:<n>": its IMDb id is asked once from Kino's own TMDB and kept.
+async function imdbOf(type, id) {
+  if (IMDB.test(id)) return id;
+  const m = /^tmdb:(\d{1,9})$/.exec(String(id));
+  if (!m || !hasTmdb()) return null;
+  const found = await cached(`imdb:${type}:${m[1]}`, FRESH_IMDB_MS, async () => {
+    const body = await kino.tmdb(`/${type === "movie" ? "movie" : "tv"}/${m[1]}/external_ids`);
+    return body && IMDB.test(String(body.imdb_id || "")) ? String(body.imdb_id) : "";
+  });
+  return found || null;
+}
+
 // What Kino knows about a title (its own TMDB lookup, in the person's language). The addon's `meta` answers nothing, so
 // episodes and the info page both come from here; only an IMDb id can be asked.
 async function metaOf(type, id) {
-  if (!IMDB.test(id) || typeof kino.meta !== "function") return null;
-  return cached(`meta:${type}:${id}`, FRESH_META_MS, async () => {
-    const m = await kino.meta({ type, ids: { imdb: id }, lang: kino.lang });
-    if (!m) throw kino.error("not_found", "Kino knows nothing about " + id);
+  const imdb = await imdbOf(type, id);
+  if (!imdb || typeof kino.meta !== "function") return null;
+  return cached(`meta:${type}:${imdb}`, FRESH_META_MS, async () => {
+    const m = await kino.meta({ type, ids: { imdb }, lang: kino.lang });
+    if (!m) throw kino.error("not_found", "Kino knows nothing about " + imdb);
     return {
+      imdb,
       title: m.title || "",
       poster: m.poster || "",
       backdrop: m.backdrop || "",
@@ -416,7 +560,7 @@ function infoOf(meta) {
 }
 
 // Seasons, then numbers, ascending; specials (season 0) and episodes that have not aired yet are left out (the addon has
-// nothing to play for them).
+// nothing to play for them). An episode's ref carries the IMDb id: that is what the addon is asked for.
 export async function episodes(ref) {
   const id = idOf(ref, "i:");
   if (!id) throw kino.error("not_found", "not a series ref: " + String(ref).slice(0, 80));
@@ -430,7 +574,7 @@ export async function episodes(ref) {
     const key = season + ":" + number;
     if (seen.has(key)) continue;
     seen.add(key);
-    const ep = { season, number, ref: `e:${id}:${season}:${number}` };
+    const ep = { season, number, ref: `e:${meta.imdb}:${season}:${number}` };
     if (title) ep.title = title;
     if (overview) ep.overview = overview;
     if (still) ep.still = still;
@@ -570,9 +714,11 @@ function writeBad(bad) {
 // own links, then the quality they prefer; the rest stay in the Server menu. The 30 minutes only matter when a playback
 // fails: Kino then asks for a fresh link.
 export async function resolve(ref, options) {
-  const movie = idOf(ref, "m:");
+  const movieId = idOf(ref, "m:");
   let path;
-  if (movie) {
+  if (movieId) {
+    const movie = await imdbOf("movie", movieId);
+    if (!movie) throw kino.error("not_found", "no IMDb id for " + movieId.slice(0, 40), { userMessage: t("noTmdb") });
     path = `/stream/movie/${enc(movie)}.json`;
   } else {
     const m = /^e:(.+):(\d{1,3}):(\d{1,5})$/.exec(String(ref || ""));
