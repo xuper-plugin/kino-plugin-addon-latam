@@ -1,0 +1,107 @@
+{
+  "id": "addon-latam",
+  "name": "Addon Latam",
+  "version": "1.0.0",
+  "apiVersion": 8,
+  "entry": "plugin.js",
+  "icon": "icon.png",
+  "description": "Películas y series en español latino con estrenos al día. Catálogo y enlaces del addon Addon Latam.",
+  "author": "xuper-plugin",
+  "homepage": "https://github.com/xuper-plugin/kino-plugin-addon-latam",
+  "hosts": [
+    "addonlatam.duckdns.org"
+  ],
+  "capabilities": [
+    "search",
+    "home",
+    "browse",
+    "episodes",
+    "resolve",
+    "download"
+  ],
+  "streamHosts": "any",
+  "secrets": {
+    "addonCode": "kino-sealed:v1:Zayp11O-09b0s7B9Zpkubczk7snToVzvkw5V3WsqnFpEq20y-J1benv_F6xshD2kb8K-DjyhwD46JtooNf3Pwy6sgwN7wSp8-bJYYHaLYrBa_qpb"
+  },
+  "categories": [
+    "movies",
+    "series"
+  ],
+  "color": "#F2B84B",
+  "section": {
+    "label": "Latam"
+  },
+  "theme": {
+    "accent": "#F2B84B",
+    "onAccent": "#1A1206",
+    "background": "#0C0D12",
+    "surface": "#171923",
+    "highlight": "#FFE2A8"
+  },
+  "telemetry": true,
+  "settings": [
+    {
+      "key": "playSection",
+      "type": "section",
+      "label": "Reproducción"
+    },
+    {
+      "key": "quality",
+      "type": "select",
+      "label": "Calidad preferida",
+      "default": "1080",
+      "options": [
+        {
+          "value": "max",
+          "label": "La más alta (4K)"
+        },
+        {
+          "value": "1080",
+          "label": "Hasta 1080p"
+        },
+        {
+          "value": "720",
+          "label": "Hasta 720p"
+        }
+      ]
+    },
+    {
+      "key": "homeSection",
+      "type": "section",
+      "label": "Inicio"
+    },
+    {
+      "key": "homeRows",
+      "type": "toggle",
+      "label": "Filas en Inicio",
+      "default": true,
+      "hint": "Los estrenos aparecen en el Inicio de Kino."
+    },
+    {
+      "key": "toolsSection",
+      "type": "section",
+      "label": "Herramientas"
+    },
+    {
+      "key": "health",
+      "type": "status",
+      "label": "Estado del servicio"
+    },
+    {
+      "key": "cache",
+      "type": "status",
+      "label": "Caché"
+    },
+    {
+      "key": "probe",
+      "type": "action",
+      "label": "Comprobar servicio"
+    },
+    {
+      "key": "clearCache",
+      "type": "action",
+      "label": "Vaciar caché",
+      "confirm": "¿Vaciar la caché de listas y fichas?"
+    }
+  ]
+}
