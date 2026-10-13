@@ -1,8 +1,8 @@
 {
   "id": "addon-latam",
   "name": "Addon Latam",
-  "version": "1.0.1",
-  "apiVersion": 8,
+  "version": "1.1.0",
+  "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
   "description": "Películas y series en español latino con estrenos al día. Catálogo y enlaces del addon Addon Latam.",
@@ -29,7 +29,8 @@
   ],
   "color": "#F2B84B",
   "section": {
-    "label": "Latam"
+    "label": "Latam",
+    "labelEn": "Latam"
   },
   "theme": {
     "accent": "#F2B84B",
@@ -43,65 +44,79 @@
     {
       "key": "playSection",
       "type": "section",
-      "label": "Reproducción"
+      "label": "Reproducción",
+      "labelEn": "Playback"
     },
     {
       "key": "quality",
       "type": "select",
       "label": "Calidad preferida",
+      "labelEn": "Preferred quality",
       "default": "1080",
       "options": [
         {
           "value": "max",
-          "label": "La más alta (4K)"
+          "label": "La más alta (4K)",
+          "labelEn": "Highest (4K)"
         },
         {
           "value": "1080",
-          "label": "Hasta 1080p"
+          "label": "Hasta 1080p",
+          "labelEn": "Up to 1080p"
         },
         {
           "value": "720",
-          "label": "Hasta 720p"
+          "label": "Hasta 720p",
+          "labelEn": "Up to 720p"
         }
       ]
     },
     {
       "key": "homeSection",
       "type": "section",
-      "label": "Inicio"
+      "label": "Inicio",
+      "labelEn": "Home"
     },
     {
       "key": "homeRows",
       "type": "toggle",
       "label": "Filas en Inicio",
-      "default": true,
-      "hint": "Los estrenos aparecen en el Inicio de Kino."
+      "labelEn": "Home rows",
+      "hint": "Los estrenos aparecen en el Inicio de Kino.",
+      "hintEn": "New releases appear on Kino's Home.",
+      "default": true
     },
     {
       "key": "toolsSection",
       "type": "section",
-      "label": "Herramientas"
+      "label": "Herramientas",
+      "labelEn": "Tools"
     },
     {
       "key": "health",
       "type": "status",
-      "label": "Estado del servicio"
+      "label": "Estado del servicio",
+      "labelEn": "Service status"
     },
     {
       "key": "cache",
       "type": "status",
-      "label": "Caché"
+      "label": "Caché",
+      "labelEn": "Cache"
     },
     {
       "key": "probe",
       "type": "action",
-      "label": "Comprobar servicio"
+      "label": "Comprobar servicio",
+      "labelEn": "Check service"
     },
     {
       "key": "clearCache",
       "type": "action",
       "label": "Vaciar caché",
-      "confirm": "¿Vaciar la caché de listas y fichas?"
+      "labelEn": "Clear cache",
+      "confirm": "¿Vaciar la caché de listas y fichas?",
+      "confirmEn": "Clear the cache of lists and titles?"
     }
   ]
 }

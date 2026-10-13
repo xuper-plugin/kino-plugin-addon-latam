@@ -16,9 +16,10 @@ const MAX_SKIP = 600;
 const LIST_TIMEOUT_MS = 8000;
 const RESOLVE_TIMEOUT_MS = 9000;
 
+// `genre` is Kino's closed vocabulary (peliculas, series, ...): it files the row under Categorías and in the filters.
 const TYPES = [
-  { type: "movie", label: "Películas", labelEn: "Movies" },
-  { type: "series", label: "Series", labelEn: "Series" },
+  { type: "movie", label: "Películas", labelEn: "Movies", genre: "peliculas" },
+  { type: "series", label: "Series", labelEn: "Series", genre: "series" },
 ];
 
 // ---- 1. texts -------------------------------------------------------------------------------------------------
@@ -312,7 +313,7 @@ async function newItems(x) {
 async function newRow(x) {
   try {
     const items = await newItems(x);
-    return items.length ? { id: "new-" + x.type, title: t("rowNew", { name: typeLabel(x) }), ref: "n:" + x.type, items: items.slice(0, ROW_MAX) } : null;
+    return items.length ? { id: "new-" + x.type, title: t("rowNew", { name: typeLabel(x) }), ref: "n:" + x.type, items: items.slice(0, ROW_MAX), genre: x.genre } : null;
   } catch (e) {
     kino.log("new " + x.type + " failed: " + (e && e.message));
     return null;
@@ -481,13 +482,36 @@ function qualityName(q) {
   return q === 2160 ? "4K" : q ? q + "p" : "";
 }
 
-function toStream(s, index) {
+// A copy is told apart across plays by a key: the addon's own `/redirect/` links (every one on the same host) by their
+// option number, anything else (a CDN link the addon passes through) by its host, so one dead CDN is one entry.
+function copyKey(url, ref, n, index) {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    // an unparsable url is judged by its position
+  }
+  return host === HOST ? `o:${ref}|${n || index + 1}` : `h:${host || index}`;
+}
+
+// Measured on three titles: the addon's own redirect links reached a server and streamed at 5-10 Mbit/s, while the direct
+// third-party links it also lists were dead (404, no connection) in every one. Tier 0 plays first, within a language.
+function tierOf(url) {
+  try {
+    return new URL(url).hostname.toLowerCase() === HOST ? 0 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+function toStream(s, index, ref) {
   const d = describe(s);
   const parts = [t("copy", { n: d.n || index + 1 })];
   if (d.quality) parts.push(qualityName(d.quality));
   if (d.lang) parts.push(t(d.lang.key));
-  const stream = { url: String(s.url), label: parts.join(" · ").slice(0, 48) };
-  return { stream, quality: d.quality, langRank: d.lang ? d.lang.rank : 4, index };
+  const url = String(s.url);
+  const stream = { url, label: parts.join(" · ").slice(0, 48) };
+  return { stream, quality: d.quality, langRank: d.lang ? d.lang.rank : 4, index, tier: tierOf(url), key: copyKey(url, ref, d.n, index) };
 }
 
 // Quality preference: "max" goes from the highest down; "1080" and "720" put the best copy that fits first, then the
@@ -509,9 +533,43 @@ async function streamsOf(path) {
   return [];
 }
 
-// The person's language first (Latin American Spanish before everything), then the quality they prefer; the rest stay in
-// the Server menu. The 30 minutes only matter when a playback fails: Kino then asks for a fresh link.
-export async function resolve(ref) {
+// ---- 8b. what failed before ---------------------------------------------------------------------------------------
+
+// Kino only tells a plugin that a copy failed when the origin REFUSED it (`options.retry`: 401, 403, 409); a dead link
+// (404, no connection) just moves the player on to the next alternative without a word. So a second resolve of the same
+// title soon after the first is read as "that copy did not work" too. The copy that was served first is then remembered as
+// bad for a while and goes last, for this title and, when it is a CDN host, for every title on that host.
+const SERVED_PREFIX = "served:";
+const BAD_KEY = "bad";
+const REOPEN_WINDOW_MS = 2 * 60 * 1000;
+const BAD_FOR_MS = 10 * 60 * 1000;
+const BAD_MAX = 40;
+
+function readBad() {
+  try {
+    const raw = JSON.parse(kino.storage.get(BAD_KEY) || "{}");
+    const now = Date.now();
+    const out = {};
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) for (const [k, until] of Object.entries(raw)) if (Number(until) > now) out[k] = Number(until);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeBad(bad) {
+  try {
+    const entries = Object.entries(bad).sort((a, b) => b[1] - a[1]).slice(0, BAD_MAX);
+    kino.storage.set(BAD_KEY, JSON.stringify(Object.fromEntries(entries)), { ttlMs: BAD_FOR_MS });
+  } catch {
+    // a full storage: the order just is not learned this time
+  }
+}
+
+// The person's language first (Latin American Spanish before everything), then copies that worked before and the addon's
+// own links, then the quality they prefer; the rest stay in the Server menu. The 30 minutes only matter when a playback
+// fails: Kino then asks for a fresh link.
+export async function resolve(ref, options) {
   const movie = idOf(ref, "m:");
   let path;
   if (movie) {
@@ -524,12 +582,38 @@ export async function resolve(ref) {
   const raw = await streamsOf(path);
   const seen = new Set();
   const pref = String(kino.config.get("quality") || "1080");
+  const bad = readBad();
+  const servedKey = SERVED_PREFIX + String(ref).slice(0, 120);
+  let prev = null;
+  try {
+    prev = JSON.parse(kino.storage.get(servedKey) || "null");
+  } catch {
+    prev = null;
+  }
+  const now = Date.now();
+  const reopened = (options && options.retry) || (prev && typeof prev.t === "number" && now - prev.t < REOPEN_WINDOW_MS);
+  if (reopened && prev && prev.key) {
+    bad[prev.key] = now + BAD_FOR_MS;
+    writeBad(bad);
+  }
   const pool = raw
-    .map(toStream)
+    .map((s, i) => toStream(s, i, ref))
     .filter((x) => (seen.has(x.stream.url) ? false : (seen.add(x.stream.url), true)))
-    .sort((a, b) => a.langRank - b.langRank || qualityRank(a.quality, pref) - qualityRank(b.quality, pref) || a.index - b.index);
+    .sort(
+      (a, b) =>
+        a.langRank - b.langRank ||
+        (bad[a.key] ? 1 : 0) - (bad[b.key] ? 1 : 0) ||
+        a.tier - b.tier ||
+        qualityRank(a.quality, pref) - qualityRank(b.quality, pref) ||
+        a.index - b.index,
+    );
   if (!pool.length) throw kino.error("not_found", "no streams for " + String(ref).slice(0, 80), { userMessage: t("noStreams") });
   const [first, ...rest] = pool;
+  try {
+    kino.storage.set(servedKey, JSON.stringify({ t: now, key: first.key }), { ttlMs: BAD_FOR_MS });
+  } catch {
+    // not remembered: the next play just starts from the same order
+  }
   const main = { ...first.stream, expiresInSeconds: 1800 };
   const alternatives = rest.slice(0, 8).map((x) => x.stream);
   if (alternatives.length) main.alternatives = alternatives;
