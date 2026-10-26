@@ -412,14 +412,55 @@ async function newRow(x) {
   }
 }
 
+// Home has 20 s and the addon can be slow or unreachable from a device (field `home timeout`, all of them past 19 s): the rows that
+// have arrived by HOME_BUDGET_MS are answered, the slowest no longer holds the others back, and its job keeps filling the
+// cache for the next Home. When no row arrives at all, the last good Home (12 h at most) is served.
+const HOME_BUDGET_MS = 14000;
+const HOME_STALE_MS = 12 * 60 * 60 * 1000;
+const HOME_ITEMS = 20;
+
+/** Runs the jobs together and answers what has finished by `ms` (undefined for the rest); kino.sleep takes at most 5 s per call. */
+async function settleWithin(jobs, ms) {
+  const out = new Array(jobs.length);
+  const settled = jobs.map((job, i) => Promise.resolve().then(job).then((v) => { out[i] = v; }, () => {}));
+  const all = Promise.all(settled).then(() => true);
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const left = Math.floor(deadline - Date.now());
+    if (left <= 0) break;
+    if (await Promise.race([all, kino.sleep(Math.min(5000, left)).then(() => false)])) break;
+  }
+  return out;
+}
+
+function homeSaved(key) {
+  const hit = cacheRead(key);
+  return hit && Array.isArray(hit.v) && Date.now() - hit.at < HOME_STALE_MS ? hit : null;
+}
+
 // Home: the new releases of both kinds, then what is popular.
 export async function home() {
   if (kino.config.get("homeRows") === false) return [];
+  const key = "home:" + (isSpanish() ? "es" : "en");
   const jobs = [
     () => newRow(TYPES[0]), () => newRow(TYPES[1]),
     () => shelfRow("movie", "pop", true), () => shelfRow("series", "pop", true),
   ];
-  return (await mapLimit(jobs, 4, (job) => job())).filter(Boolean);
+  const rows = (await settleWithin(jobs, HOME_BUDGET_MS)).filter(Boolean);
+  if (!rows.length) {
+    const saved = homeSaved(key);
+    if (saved) {
+      kino.log("Home: no row arrived, serving the last good one");
+      return saved.v;
+    }
+    return rows;
+  }
+  // The last good Home, without synopses so it stays small; a Home with fewer rows than the saved one (a row was late) does not replace it.
+  const prev = homeSaved(key);
+  if (!prev || rows.length >= prev.v.length) {
+    cacheWrite(key, rows.map((r) => ({ ...r, items: r.items.slice(0, HOME_ITEMS).map(({ overview, ...rest }) => rest) })));
+  }
+  return rows;
 }
 
 // A kind's new releases (the addon pages them by `skip`, 1800 movies and 2400 series deep) or a TMDB shelf (page number).

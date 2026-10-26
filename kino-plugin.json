@@ -1,7 +1,7 @@
 {
   "id": "addon-latam",
   "name": "Addon Latam",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
