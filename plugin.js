@@ -299,7 +299,17 @@ function itemsOf(body, type) {
 
 // Movies and series at once (or only the kind Kino asked for); a list that fails is left out. Interleaved, de-duplicated,
 // then ORDERED (never filtered) by how much each title resembles what was typed.
+// A search has 15 s in all. A round asked with 8 s per request, and a failed round (empty after a timeout) was followed by a second round
+// with another title: 16 s or more, the field's "search timeout". Requests are now cut at 6.5 s, and the second round only follows a round
+// that really answered nothing (no request failed) and only while a 12.5 s budget has time for it.
+const SEARCH_REQUEST_MS = 6500;
+const SEARCH_BUDGET_MS = 12500;
+const SEARCH_MIN_LEFT_MS = 3000;
+
 export async function search(query) {
+  const started = Date.now();
+  const timeLeft = () => SEARCH_BUDGET_MS - (Date.now() - started);
+  let failures = 0;
   const q = kino.rank.shortQuery(String(query.q || "").trim());
   if (!q) return [];
   const wanted = TYPES.filter((x) => query.type !== "movie" && query.type !== "series" ? true : x.type === query.type);
@@ -307,8 +317,9 @@ export async function search(query) {
   async function run(text) {
     const lists = await mapLimit(wanted, 2, async (x) => {
       try {
-        return itemsOf(await getJson(searchUrl(x.type, text), LIST_TIMEOUT_MS), x.type);
+        return itemsOf(await getJson(searchUrl(x.type, text), Math.max(1000, Math.min(SEARCH_REQUEST_MS, timeLeft()))), x.type);
       } catch (e) {
+        failures += 1;
         kino.log("search " + x.type + " failed: " + (e && e.message));
         return [];
       }
@@ -321,7 +332,7 @@ export async function search(query) {
   }
   let found = await run(q);
   // The typed (or TMDB's) title may not be the one the catalog uses: one more round with the first other title.
-  if (!found.length) {
+  if (!found.length && failures === 0 && timeLeft() >= SEARCH_MIN_LEFT_MS) {
     const other = titles.map((x) => kino.rank.shortQuery(x.trim())).find((x) => x && x.toLowerCase() !== q.toLowerCase());
     if (other) found = await run(other);
   }
