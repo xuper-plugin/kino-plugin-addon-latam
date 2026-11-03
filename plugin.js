@@ -830,10 +830,10 @@ async function getJson(path, timeoutMs) {
   }
 }
 function newUrl(type, skip) {
-  return `/catalog/${type}/addonlatam-new-releases-${type}${skip > 0 ? "/skip=" + skip : ""}.json`;
+  return `/catalog/${type}/addonlatam-estrenos${skip > 0 ? "/skip=" + skip : ""}.json`;
 }
 function searchUrl(type, query) {
-  return `/catalog/${type}/addonlatam-search-${type}/search=${enc(query)}.json`;
+  return `/catalog/${type}/addonlatam-estrenos/search=${enc(query)}.json`;
 }
 async function mapLimit(list, limit, fn) {
   const out = new Array(list.length);

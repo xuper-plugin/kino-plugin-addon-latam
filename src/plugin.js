@@ -214,11 +214,13 @@ async function getJson(path, timeoutMs) {
 }
 
 function newUrl(type, skip) {
-  return `/catalog/${type}/addonlatam-new-releases-${type}${skip > 0 ? "/skip=" + skip : ""}.json`;
+  // The addon renamed its catalogs: one "estrenos" per kind (the old "new-releases-<kind>" ones answer with empty lists).
+  return `/catalog/${type}/addonlatam-estrenos${skip > 0 ? "/skip=" + skip : ""}.json`;
 }
 
 function searchUrl(type, query) {
-  return `/catalog/${type}/addonlatam-search-${type}/search=${enc(query)}.json`;
+  // The search is an extra of the same catalog now (the old "search-<kind>" catalog answers with an empty list).
+  return `/catalog/${type}/addonlatam-estrenos/search=${enc(query)}.json`;
 }
 
 async function mapLimit(list, limit, fn) {

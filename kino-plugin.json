@@ -1,7 +1,7 @@
 {
   "id": "addon-latam",
   "name": "PelicuSeries",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -21,7 +21,7 @@
   ],
   "streamHosts": "any",
   "secrets": {
-    "addonCode": "kino-sealed:v1:Zayp11O-09b0s7B9Zpkubczk7snToVzvkw5V3WsqnFpEq20y-J1benv_F6xshD2kb8K-DjyhwD46JtooNf3Pwy6sgwN7wSp8-bJYYHaLYrBa_qpb"
+    "addonCode": "kino-sealed:v1:urLDiM1BquLKL23BPxNTW35H9QGfV3LrTWYyMvB5pWairdki0MP3AqzI3cMAcN9u9VfCfJmnXFWdgPWw1yKzSnXJ1Q6Jx9hjLkEeL5-nbJziuvuw"
   },
   "categories": [
     "movies",
