@@ -1,7 +1,7 @@
 {
   "id": "addon-latam",
-  "name": "Addon Latam",
-  "version": "1.2.0",
+  "name": "PelicuSeries",
+  "version": "1.3.0",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -29,8 +29,8 @@
   ],
   "color": "#F2B84B",
   "section": {
-    "label": "Latam",
-    "labelEn": "Latam"
+    "label": "PelicuSeries",
+    "labelEn": "PelicuSeries"
   },
   "theme": {
     "accent": "#F2B84B",
@@ -118,5 +118,32 @@
       "confirm": "¿Vaciar la caché de listas y fichas?",
       "confirmEn": "Clear the cache of lists and titles?"
     }
-  ]
+  ],
+  "enhancements": {
+    "14": {
+      "capabilities": [
+        "screen"
+      ],
+      "screen": {
+        "label": "PelicuSeries",
+        "labelEn": "PelicuSeries",
+        "icon": "movie",
+        "menuOpens": "screen",
+        "opensFrom": [
+          "menu",
+          "settings"
+        ],
+        "settingsButton": {
+          "label": "Abrir PelicuSeries",
+          "labelEn": "Open PelicuSeries"
+        },
+        "settingsIn": "screen"
+      }
+    },
+    "19": {
+      "capabilities": [
+        "screen"
+      ]
+    }
+  }
 }

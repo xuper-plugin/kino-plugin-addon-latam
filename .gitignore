@@ -1,3 +1,1 @@
-.kino-secrets.json
-.kino-cookies.json
-.kino-storage.json
+.kino-*.json

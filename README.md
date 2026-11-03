@@ -1,4 +1,4 @@
-# Addon Latam — plugin de Kino
+# PelicuSeries — plugin de Kino
 
 Películas y series en español latino, con estrenos al día.
 
@@ -13,7 +13,7 @@ addon va sellado en el plugin y solo se abre desde la rama principal).
 ## Qué trae
 
 - **Inicio**: estrenos de películas y de series, y lo más popular de cada una.
-- **Sección propia «Latam»** con tres pestañas: **Estrenos**, **Películas** y **Series**. Las dos últimas traen filas de
+- **Sección propia «PelicuSeries»** con tres pestañas: **Estrenos**, **Películas** y **Series**. Las dos últimas traen filas de
   Populares, Mejor valoradas y una por género (Acción, Comedia, Drama, Terror, Ciencia ficción…), cada una con «Ver más».
 - **Categorías**: una ficha por género de películas y de series, más los estrenos de cine y de series.
 - **Búsqueda** de películas y series juntas.
