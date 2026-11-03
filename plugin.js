@@ -885,7 +885,13 @@ function toItem(m, type) {
 function itemsOf(body, type) {
   return body && Array.isArray(body.metas) ? body.metas.filter((m) => m && m.id && m.name).map((m) => toItem(m, type)) : [];
 }
+var SEARCH_REQUEST_MS = 6500;
+var SEARCH_BUDGET_MS = 12500;
+var SEARCH_MIN_LEFT_MS = 3e3;
 async function search(query) {
+  const started = Date.now();
+  const timeLeft = () => SEARCH_BUDGET_MS - (Date.now() - started);
+  let failures = 0;
   const q = kino.rank.shortQuery(String(query.q || "").trim());
   if (!q) return [];
   const wanted = TYPES.filter((x) => query.type !== "movie" && query.type !== "series" ? true : x.type === query.type);
@@ -893,8 +899,9 @@ async function search(query) {
   async function run(text) {
     const lists = await mapLimit(wanted, 2, async (x) => {
       try {
-        return itemsOf(await getJson(searchUrl(x.type, text), LIST_TIMEOUT_MS), x.type);
+        return itemsOf(await getJson(searchUrl(x.type, text), Math.max(1e3, Math.min(SEARCH_REQUEST_MS, timeLeft()))), x.type);
       } catch (e) {
+        failures += 1;
         kino.log("search " + x.type + " failed: " + (e && e.message));
         return [];
       }
@@ -906,7 +913,7 @@ async function search(query) {
     return merged.filter((it) => seen.has(it.id) ? false : (seen.add(it.id), true));
   }
   let found = await run(q);
-  if (!found.length) {
+  if (!found.length && failures === 0 && timeLeft() >= SEARCH_MIN_LEFT_MS) {
     const other = titles.map((x) => kino.rank.shortQuery(x.trim())).find((x) => x && x.toLowerCase() !== q.toLowerCase());
     if (other) found = await run(other);
   }
@@ -980,15 +987,51 @@ async function newRow(x) {
     return null;
   }
 }
+var HOME_BUDGET_MS = 14e3;
+var HOME_STALE_MS = 12 * 60 * 60 * 1e3;
+var HOME_ITEMS = 20;
+async function settleWithin(jobs, ms) {
+  const out = new Array(jobs.length);
+  const settled = jobs.map((job, i) => Promise.resolve().then(job).then((v) => {
+    out[i] = v;
+  }, () => {
+  }));
+  const all = Promise.all(settled).then(() => true);
+  const deadline = Date.now() + ms;
+  for (; ; ) {
+    const left = Math.floor(deadline - Date.now());
+    if (left <= 0) break;
+    if (await Promise.race([all, kino.sleep(Math.min(5e3, left)).then(() => false)])) break;
+  }
+  return out;
+}
+function homeSaved(key) {
+  const hit = cacheRead(key);
+  return hit && Array.isArray(hit.v) && Date.now() - hit.at < HOME_STALE_MS ? hit : null;
+}
 async function home() {
   if (kino.config.get("homeRows") === false) return [];
+  const key = "home:" + (isSpanish() ? "es" : "en");
   const jobs = [
     () => newRow(TYPES[0]),
     () => newRow(TYPES[1]),
     () => shelfRow("movie", "pop", true),
     () => shelfRow("series", "pop", true)
   ];
-  return (await mapLimit(jobs, 4, (job) => job())).filter(Boolean);
+  const rows = (await settleWithin(jobs, HOME_BUDGET_MS)).filter(Boolean);
+  if (!rows.length) {
+    const saved = homeSaved(key);
+    if (saved) {
+      kino.log("Home: no row arrived, serving the last good one");
+      return saved.v;
+    }
+    return rows;
+  }
+  const prev = homeSaved(key);
+  if (!prev || rows.length >= prev.v.length) {
+    cacheWrite(key, rows.map((r) => ({ ...r, items: r.items.slice(0, HOME_ITEMS).map(({ overview, ...rest }) => rest) })));
+  }
+  return rows;
 }
 async function browse(ref, cursor) {
   const n = /^n:(movie|series)$/.exec(String(ref || ""));

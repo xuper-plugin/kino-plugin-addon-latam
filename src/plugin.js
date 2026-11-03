@@ -304,7 +304,17 @@ function itemsOf(body, type) {
 
 // Movies and series at once (or only the kind Kino asked for); a list that fails is left out. Interleaved, de-duplicated,
 // then ORDERED (never filtered) by how much each title resembles what was typed.
+// A search has 15 s in all. A round asked with 8 s per request, and a failed round (empty after a timeout) was followed by a second round
+// with another title: 16 s or more, the field's "search timeout". Requests are now cut at 6.5 s, and the second round only follows a round
+// that really answered nothing (no request failed) and only while a 12.5 s budget has time for it.
+const SEARCH_REQUEST_MS = 6500;
+const SEARCH_BUDGET_MS = 12500;
+const SEARCH_MIN_LEFT_MS = 3000;
+
 export async function search(query) {
+  const started = Date.now();
+  const timeLeft = () => SEARCH_BUDGET_MS - (Date.now() - started);
+  let failures = 0;
   const q = kino.rank.shortQuery(String(query.q || "").trim());
   if (!q) return [];
   const wanted = TYPES.filter((x) => query.type !== "movie" && query.type !== "series" ? true : x.type === query.type);
@@ -312,8 +322,9 @@ export async function search(query) {
   async function run(text) {
     const lists = await mapLimit(wanted, 2, async (x) => {
       try {
-        return itemsOf(await getJson(searchUrl(x.type, text), LIST_TIMEOUT_MS), x.type);
+        return itemsOf(await getJson(searchUrl(x.type, text), Math.max(1000, Math.min(SEARCH_REQUEST_MS, timeLeft()))), x.type);
       } catch (e) {
+        failures += 1;
         kino.log("search " + x.type + " failed: " + (e && e.message));
         return [];
       }
@@ -326,7 +337,7 @@ export async function search(query) {
   }
   let found = await run(q);
   // The typed (or TMDB's) title may not be the one the catalog uses: one more round with the first other title.
-  if (!found.length) {
+  if (!found.length && failures === 0 && timeLeft() >= SEARCH_MIN_LEFT_MS) {
     const other = titles.map((x) => kino.rank.shortQuery(x.trim())).find((x) => x && x.toLowerCase() !== q.toLowerCase());
     if (other) found = await run(other);
   }
@@ -418,14 +429,55 @@ async function newRow(x) {
   }
 }
 
+// Home has 20 s and the addon can be slow or unreachable from a device (field `home timeout`, all of them past 19 s): the rows that
+// have arrived by HOME_BUDGET_MS are answered, the slowest no longer holds the others back, and its job keeps filling the
+// cache for the next Home. When no row arrives at all, the last good Home (12 h at most) is served.
+const HOME_BUDGET_MS = 14000;
+const HOME_STALE_MS = 12 * 60 * 60 * 1000;
+const HOME_ITEMS = 20;
+
+/** Runs the jobs together and answers what has finished by `ms` (undefined for the rest); kino.sleep takes at most 5 s per call. */
+async function settleWithin(jobs, ms) {
+  const out = new Array(jobs.length);
+  const settled = jobs.map((job, i) => Promise.resolve().then(job).then((v) => { out[i] = v; }, () => {}));
+  const all = Promise.all(settled).then(() => true);
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const left = Math.floor(deadline - Date.now());
+    if (left <= 0) break;
+    if (await Promise.race([all, kino.sleep(Math.min(5000, left)).then(() => false)])) break;
+  }
+  return out;
+}
+
+function homeSaved(key) {
+  const hit = cacheRead(key);
+  return hit && Array.isArray(hit.v) && Date.now() - hit.at < HOME_STALE_MS ? hit : null;
+}
+
 // Home: the new releases of both kinds, then what is popular.
 export async function home() {
   if (kino.config.get("homeRows") === false) return [];
+  const key = "home:" + (isSpanish() ? "es" : "en");
   const jobs = [
     () => newRow(TYPES[0]), () => newRow(TYPES[1]),
     () => shelfRow("movie", "pop", true), () => shelfRow("series", "pop", true),
   ];
-  return (await mapLimit(jobs, 4, (job) => job())).filter(Boolean);
+  const rows = (await settleWithin(jobs, HOME_BUDGET_MS)).filter(Boolean);
+  if (!rows.length) {
+    const saved = homeSaved(key);
+    if (saved) {
+      kino.log("Home: no row arrived, serving the last good one");
+      return saved.v;
+    }
+    return rows;
+  }
+  // The last good Home, without synopses so it stays small; a Home with fewer rows than the saved one (a row was late) does not replace it.
+  const prev = homeSaved(key);
+  if (!prev || rows.length >= prev.v.length) {
+    cacheWrite(key, rows.map((r) => ({ ...r, items: r.items.slice(0, HOME_ITEMS).map(({ overview, ...rest }) => rest) })));
+  }
+  return rows;
 }
 
 // A kind's new releases (the addon pages them by `skip`, 1800 movies and 2400 series deep) or a TMDB shelf (page number).
