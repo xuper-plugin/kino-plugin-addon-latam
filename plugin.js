@@ -173,7 +173,7 @@ var slideNode = (s) => ({
 });
 var hero = (slides) => slides.length === 1 ? slideNode(slides[0]) : {
   type: "PageView",
-  key: "hero",
+  key: "hero" + slides.length,
   autoPlayMs: 6e3,
   children: slides.map(slideNode)
 };
@@ -438,7 +438,7 @@ function makeBrowse({ kino: kino2, loadTab, searchTitles, imdbOfTmdb = () => "" 
   }
   function writeSnap(tab, data) {
     for (let per = 10; per >= 3; per -= 2) {
-      const slim2 = { slides: data.slides.slice(0, 4), rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
+      const slim2 = { slides: data.slides, rails: data.rails.map((r) => ({ ...r, items: r.items.slice(0, per) })) };
       const text = JSON.stringify({ at: Date.now(), data: slim2 });
       if (text.length <= SNAP_MAX) {
         set(SNAP_PREFIX + tab, text, { ttlMs: SNAP_TTL_MS });

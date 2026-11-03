@@ -1,7 +1,7 @@
 {
   "id": "addon-latam",
   "name": "PelicuSeries",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "apiVersion": 9,
   "entry": "plugin.js",
   "icon": "icon.png",

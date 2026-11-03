@@ -49,8 +49,10 @@ const slideNode = (s) => ({
   ],
 });
 
+// The key carries the number of slides: Kino's pager (0.9.81) keeps the count of its first drawing, and a slider that goes from one
+// number of slides to another closed the app with "Index 4 out of bounds for length 4". A new key is a new pager.
 const hero = (slides) => (slides.length === 1 ? slideNode(slides[0]) : {
-  type: "PageView", key: "hero", autoPlayMs: 6_000, children: slides.map(slideNode),
+  type: "PageView", key: "hero" + slides.length, autoPlayMs: 6_000, children: slides.map(slideNode),
 });
 
 // On a TV the posters are smaller (the "small" size): a "medium" poster pushes its name below the screen's edge.

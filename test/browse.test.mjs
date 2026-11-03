@@ -76,7 +76,8 @@ test("open on a phone queues the active tab first then the others; the timer loa
   const r = await h.render();
   assert.deepEqual(r.dropped, []);
   assert.ok(types(r.tree).includes("pageView"), "the featured slider");
-  assert.equal(byKey(r.tree, "hero").autoPlayMs, 6000);
+  assert.equal(all(r.tree).find((n) => n.type === "pageView").autoPlayMs, 6000);
+  assert.match(all(r.tree).find((n) => n.type === "pageView").key, /^hero\d+$/, "the slider's key carries its slide count");
   assert.equal(all(r.tree).filter((n) => n.type === "titleRail").length, 2);
   while ((h.state.pending || []).length > 0) await h.send("tick", { timer: true });
   assert.deepEqual(h.loaded, ["inicio", "peliculas", "series"]);
